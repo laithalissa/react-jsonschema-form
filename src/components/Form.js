@@ -2,13 +2,15 @@ import React, { Component } from "react";
 import PropTypes from "prop-types";
 
 import { default as DefaultErrorList } from "./ErrorList";
+import { default as LoadingMessage } from "./LoadingMessage";
 import {
   getDefaultFormState,
+  getDefaultRegistry,
+  isPromise,
   retrieveSchema,
+  setState,
   shouldRender,
   toIdSchema,
-  setState,
-  getDefaultRegistry,
 } from "../utils";
 import validateFormData, { toErrorList } from "../validate";
 
@@ -20,15 +22,40 @@ export default class Form extends Component {
     safeRenderCompletion: false,
     noHtml5Validate: false,
     ErrorList: DefaultErrorList,
+    renderValidatingMessage: true,
   };
 
   constructor(props) {
     super(props);
-    this.state = this.getStateFromProps(props);
+    this.state = this.unpackValidationResult(this.getStateFromProps(props));
   }
 
   componentWillReceiveProps(nextProps) {
-    this.setState(this.getStateFromProps(nextProps));
+    this.setState(
+      this.unpackValidationResult(this.getStateFromProps(nextProps))
+    );
+  }
+
+  unpackValidationResult(stateObj) {
+    // Unpack the validationResult from a state object as appropriate: If it's
+    // wrapped in a promise, then add a callback to setState once the promise
+    // resolves, otherwise just unpack the object.
+    let { validationResult, ...state } = stateObj;
+
+    if (!isPromise(validationResult)) {
+      state = { ...validationResult, ...state };
+      return state;
+    }
+
+    state = { waitingForValidation: true, ...state };
+    validationResult.then(errorObj => {
+      // Something beat us to updating the state, so don't change it now
+      if (this.props !== this.originalProps) {
+        return;
+      }
+      this.setState({ waitingForValidation: false, ...errorObj });
+    });
+    return state;
   }
 
   getStateFromProps(props) {
@@ -42,12 +69,15 @@ export default class Form extends Component {
     const formData = getDefaultFormState(schema, props.formData, definitions);
     const retrievedSchema = retrieveSchema(schema, definitions, formData);
 
-    const { errors, errorSchema } = mustValidate
+    // Maintain a reference to the current props to mitigate races
+    this.originalProps = props;
+    const validationResult = mustValidate
       ? this.validate(formData, schema)
       : {
           errors: state.errors || [],
           errorSchema: state.errorSchema || {},
         };
+
     const idSchema = toIdSchema(
       retrievedSchema,
       uiSchema["ui:rootFieldId"],
@@ -55,14 +85,14 @@ export default class Form extends Component {
       formData,
       props.idPrefix
     );
+
     return {
       schema,
       uiSchema,
       idSchema,
       formData,
       edit,
-      errors,
-      errorSchema,
+      validationResult,
     };
   }
 
@@ -81,6 +111,9 @@ export default class Form extends Component {
   }
 
   renderErrors() {
+    if (this.state.waitingForValidation) {
+      return null;
+    }
     const { errors, errorSchema, schema, uiSchema } = this.state;
     const { ErrorList, showErrorList, formContext } = this.props;
 
@@ -98,24 +131,45 @@ export default class Form extends Component {
     return null;
   }
 
+  renderValidatingIndicator() {
+    if (!this.props.renderValidatingMessage) {
+      return null;
+    }
+
+    return (
+      <LoadingMessage
+        show={this.state.waitingForValidation}
+        message="Validating..."
+      />
+    );
+  }
+
   onChange = (formData, newErrorSchema) => {
+    const handleValidationResult = result => {
+      return setState(this, { ...state, ...result }, () => {
+        if (this.props.onChange) {
+          this.props.onChange(this.state);
+        }
+      });
+    };
+
     const mustValidate = !this.props.noValidate && this.props.liveValidate;
     let state = { formData };
+    let validationResult;
     if (mustValidate) {
-      const { errors, errorSchema } = this.validate(formData);
-      state = { ...state, errors, errorSchema };
+      validationResult = this.validate(formData);
     } else if (!this.props.noValidate && newErrorSchema) {
-      state = {
-        ...state,
+      validationResult = {
         errorSchema: newErrorSchema,
         errors: toErrorList(newErrorSchema),
       };
     }
-    setState(this, state, () => {
-      if (this.props.onChange) {
-        this.props.onChange(this.state);
-      }
-    });
+
+    if (isPromise(validationResult)) {
+      validationResult.then(vr => handleValidationResult(vr));
+      return;
+    }
+    handleValidationResult(validationResult);
   };
 
   onBlur = (...args) => {
@@ -132,9 +186,7 @@ export default class Form extends Component {
 
   onSubmit = event => {
     event.preventDefault();
-
-    if (!this.props.noValidate) {
-      const { errors, errorSchema } = this.validate(this.state.formData);
+    const handleValidationResult = ({ errors, errorSchema }) => {
       if (Object.keys(errors).length > 0) {
         setState(this, { errors, errorSchema }, () => {
           if (this.props.onError) {
@@ -145,12 +197,20 @@ export default class Form extends Component {
         });
         return;
       }
-    }
+      if (this.props.onSubmit) {
+        this.props.onSubmit({ ...this.state, status: "submitted" });
+      }
+      this.setState({ errors: [], errorSchema: {} });
+    };
 
-    if (this.props.onSubmit) {
-      this.props.onSubmit({ ...this.state, status: "submitted" });
+    if (!this.props.noValidate) {
+      let validationResult = this.validate(this.state.formData);
+      if (isPromise(validationResult)) {
+        validationResult.then(x => handleValidationResult(x));
+      } else {
+        handleValidationResult(validationResult);
+      }
     }
-    this.setState({ errors: [], errorSchema: {} });
   };
 
   getRegistry() {
@@ -202,6 +262,7 @@ export default class Form extends Component {
         noValidate={noHtml5Validate}
         onSubmit={this.onSubmit}>
         {this.renderErrors()}
+        {this.renderValidatingIndicator()}
         <_SchemaField
           schema={schema}
           uiSchema={uiSchema}

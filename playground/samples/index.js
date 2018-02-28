@@ -10,6 +10,7 @@ import errors from "./errors";
 import large from "./large";
 import date from "./date";
 import validation from "./validation";
+import asyncValidation from "./asyncValidation";
 import files from "./files";
 import single from "./single";
 import customArray from "./customArray";
@@ -31,6 +32,7 @@ export const samples = {
   Large: large,
   "Date & time": date,
   Validation: validation,
+  "Async Validation": asyncValidation,
   Files: files,
   Single: single,
   "Custom Array": customArray,

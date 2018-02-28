@@ -234,6 +234,11 @@ export function mergeObjects(obj1, obj2, concatArrays = false) {
   }, acc);
 }
 
+export function isPromise(thing) {
+  // This is basically to make code more readable
+  return thing && typeof thing.then === "function";
+}
+
 export function asNumber(value) {
   if (value === "") {
     return undefined;

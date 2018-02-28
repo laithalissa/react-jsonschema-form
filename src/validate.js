@@ -166,13 +166,21 @@ export default function validateFormData(
     return { errors, errorSchema };
   }
 
-  const errorHandler = customValidate(formData, createErrorHandler(formData));
+  let validationResult = customValidate(formData, createErrorHandler(formData));
+  if (typeof validationResult.then === "function") {
+    return validationResult.then(vr =>
+      handleValidationResults(vr, errorSchema)
+    );
+  }
+  return handleValidationResults(validationResult, errorSchema);
+}
+
+function handleValidationResults(errorHandler, errorSchema) {
   const userErrorSchema = unwrapErrorHandler(errorHandler);
   const newErrorSchema = mergeObjects(errorSchema, userErrorSchema, true);
   // XXX: The errors list produced is not fully compliant with the format
   // exposed by the jsonschema lib, which contains full field paths and other
   // properties.
   const newErrors = toErrorList(newErrorSchema);
-
   return { errors: newErrors, errorSchema: newErrorSchema };
 }

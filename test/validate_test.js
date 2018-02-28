@@ -79,6 +79,42 @@ describe("Validation", () => {
       });
     });
 
+    describe("Custom async validation function", () => {
+      let validationResult;
+
+      const schema = {
+        type: "object",
+        required: ["pass1", "pass2"],
+        properties: {
+          pass1: { type: "string" },
+          pass2: { type: "string" },
+        },
+      };
+
+      beforeEach(() => {
+        const validate = (formData, errors) => {
+          return new Promise(resolve => {
+            setTimeout(() => {
+              if (formData.pass1 !== formData.pass2) {
+                errors.pass2.addError("passwords don't match.");
+              }
+              return resolve(errors);
+            }, 0);
+          });
+        };
+        const formData = { pass1: "a", pass2: "b" };
+        validationResult = validateFormData(formData, schema, validate);
+      });
+
+      it("should return a promise of an error list", done => {
+        validationResult.then(({ errors }) => {
+          expect(errors).to.have.length.of(1);
+          expect(errors[0].stack).eql("pass2: passwords don't match.");
+          done();
+        });
+      });
+    });
+
     describe("toErrorList()", () => {
       it("should convert an errorSchema into a flat list", () => {
         expect(
